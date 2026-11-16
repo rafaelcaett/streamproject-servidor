@@ -1,0 +1,16 @@
+{
+  "name": "streamproject-server",
+  "version": "0.1.0",
+  "description": "Servidor de sinalizacao e pagina de quem assiste",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  }
+}
