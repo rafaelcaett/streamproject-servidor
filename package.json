@@ -1,6 +1,6 @@
 {
   "name": "streamproject-server",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Servidor de sinalizacao e pagina de quem assiste",
   "private": true,
   "main": "server.js",

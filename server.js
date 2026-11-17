@@ -26,7 +26,10 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PROTOCOL_VERSION = 2;
-const PORT = Number(process.env.PORT) || 8080;
+const SERVER_VERSION = require('./package.json').version;
+const PORT = process.env.PORT === undefined ? 8080 : Number(process.env.PORT);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) throw new Error('PORT inválida.');
+const BIND_ADDRESS = process.env.BIND_ADDRESS || undefined;
 const HOST_KEY = process.env.HOST_KEY || '';
 const MAX_VIEWERS = Number(process.env.MAX_VIEWERS) || 6;
 const HOST_GRACE_MS = Number(process.env.HOST_GRACE_MS) || 45000;
@@ -66,7 +69,7 @@ const server = http.createServer((req, res) => {
 
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ ok: true, v: PROTOCOL_VERSION, rooms: rooms.size }));
+    res.end(JSON.stringify({ ok: true, v: PROTOCOL_VERSION, version: SERVER_VERSION, rooms: rooms.size }));
     return;
   }
 
@@ -115,12 +118,22 @@ function sameSecret(a, b) {
 }
 
 function normalizeRoom(value) {
-  const room = String(value || '').trim().toLowerCase();
+  if (typeof value !== 'string') return null;
+  const room = value.trim().toLowerCase();
   return /^[a-z0-9_-]{3,32}$/.test(room) ? room : null;
 }
 
 function cleanName(value) {
-  return String(value || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24) || 'Convidado';
+  return (typeof value === 'string' ? value : '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 24) || 'Convidado';
+}
+
+function validMessage(msg) {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.type !== 'string') return false;
+  for (const [key, max] of Object.entries({ room: 32, password: 64, hostKey: 512, token: 128, name: 24, resume: 128, to: 128, id: 128 })) {
+    if (msg[key] !== undefined && (typeof msg[key] !== 'string' || msg[key].length > max)) return false;
+  }
+  if (msg.type === 'signal' && (!msg.data || typeof msg.data !== 'object' || Array.isArray(msg.data))) return false;
+  return true;
 }
 
 wss.on('connection', (ws) => {
@@ -140,14 +153,19 @@ wss.on('connection', (ws) => {
     } catch {
       return;
     }
-    if (!msg || typeof msg.type !== 'string') return;
+    if (!validMessage(msg)) return reject(ws, 'bad-message', 'Mensagem inválida. Atualize o aplicativo e tente novamente.');
 
-    switch (msg.type) {
-      case 'host': return onHost(ws, msg);
-      case 'join': return onJoin(ws, msg);
-      case 'signal': return onSignal(ws, msg);
-      case 'kick': return onKick(ws, msg);
-      case 'end': return onEnd(ws);
+    try {
+      switch (msg.type) {
+        case 'host': return onHost(ws, msg);
+        case 'join': return onJoin(ws, msg);
+        case 'signal': return onSignal(ws, msg);
+        case 'kick': return onKick(ws, msg);
+        case 'end': return onEnd(ws);
+      }
+    } catch (err) {
+      console.error('Falha ao processar mensagem:', err.message);
+      reject(ws, 'bad-message', 'Não foi possível processar a mensagem.');
     }
   });
 
@@ -329,7 +347,15 @@ const heartbeat = setInterval(() => {
 
 wss.on('close', () => clearInterval(heartbeat));
 
-server.listen(PORT, () => {
-  console.log(`StreamProject: servidor v${PROTOCOL_VERSION} no ar em http://localhost:${PORT}`);
+server.on('error', (err) => {
+  console.error(err.code === 'EADDRINUSE' ? `A porta ${PORT} já está em uso.` : err.message);
+  process.exitCode = 1;
+  wss.close();
+});
+
+server.listen(PORT, BIND_ADDRESS, () => {
+  console.log(`StreamProject: servidor ${SERVER_VERSION} (protocolo ${PROTOCOL_VERSION}) no ar em http://localhost:${server.address().port}`);
   if (HOST_KEY) console.log('Chave de servidor exigida para transmitir.');
 });
+
+module.exports = { server, wss, rooms };
